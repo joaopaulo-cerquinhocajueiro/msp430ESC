@@ -1,57 +1,80 @@
 /**********************************************************
+ * MAPEAMENTO MSP430G2553
  *
+ * P1.0 - Nível Bateria_1
  * P1.1 - canal avanço/recuo
  * P1.2 - canal direita/esquerda
- * P1.0 - motor direito avanço
- * P1.6 - motor direito recuo
- * P1.3 - motor esquerdo avanço
  * P1.4 - led vermelho
  * P1.5 - led verde
- * P2.7 - led azul
- * P1.7  - motor esquerdo recuo
- *                         ---------------
- *                    VDD--| 1        14 |--GND
- *            P1.0    MDA--| 2        13 |--        P2.6
- *            P1.1  IN_AR--| 3        12 |-- LED_B  P2.7
- *            P1.2  IN_DE--| 4        11 |-- TEST
- *            P1.3    MEA--| 5        10 |-- RST
- *            P1.4  LED_R--| 6         9 |-- MER    P1.7
- *            P1.5  LED_G--| 7         8 |-- MDR    P1.6
- *                         --------------
- *********************************************************/
+ * P1.7 - Nível Bateria_2
+ * P2.0 - led azul
+ * P2.1 - motor esquerdo recuo
+ * P2.2 - motor esquerdo avanco
+ * P2.4 - motor direito recuo
+ * P2.5 - motor direito avanco
 
-#include <msp430.h>
+ *                           MSP430G2553
+ *                         ---------------
+ *                    VDD--| 1        20 |--GND
+ *            P1.0  NBAT1--| 2        19 |--        P2.6
+ *            P1.1  IN_AR--| 3        18 |--        P2.7
+ *            P1.2  IN_DE--| 4        17 |--TEST
+ *            P1.3       --| 5        16 |--RST
+ *            P1.4  LED_R--| 6        15 |--NBAT2   P1.7
+ *            P1.5  LED_G--| 7        14 |--        P1.6
+ *            P2.0  LED_B--| 8        13 |--MDA     P2.5
+ *            P2.1    MER--| 9        12 |--MDR     P2.4
+ *            P2.2    MEA--| 10       11 |--        P2.3
+ *                         ---------------
+ **********************************************************/
+
+
+
+
+#include <msp430.h> 
+#include <msp430g2553.h>
 
 // Ports e bits dos leds
 // Port 1
 #define LED_R BIT4
 #define LED_G BIT5
 // Port 2
-#define LED_B BIT7
+#define LED_B BIT0
 
 // Bits dos motores
-#define MDA BIT0
-#define MDR BIT6
-#define MEA BIT3
-#define MER BIT7
+#define MDR BIT4
+#define MDA BIT5
+#define MER BIT1
+#define MEA BIT2
 
 // Bits dos sinais de entrada
 #define IN_AR BIT1
 #define IN_DE BIT2
 
-#define MAX_COMM_DELAY 30000
-// definindo o SMCLK em 1MHz, o LOOP_LENGTH causará um loop a 100 kHz.
-#define LOOP_LENGTH 10
+//Bits dos niveis de bateria
+#define NBAT_1 BIT0
+#define NBAT_2 BIT7
+
+#define MAX_COMM_DELAY 120000 // em microsegundos/4 - 30 ms
+// definindo o SMCLK em 4MHz, o LOOP_LENGTH causará um loop a 40 kHz.
+#define LOOP_LENGTH 100
+
+
+// O número de bits do PWM vai influenciar na resolução do sinal PWM.
+#define BITS_PWM 8
+// Com 8 bits, temos uma resolução de 256 passos. A frequência do PWM fica 4 MHz/(2*256) = 7,8 kHz  OBS.: o numero de passos é multipliado por 2 devido ao modo Up/Down
+#define PWM_MAX ((1<<BITS_PWM)-1)
+
 unsigned int inputChannel0Status, inputChannel1Status;
 unsigned int inputChannel0Value,inputChannel1Value;
 unsigned int inputChannel0Start,inputChannel1Start;
 
 // Valores mínimos e máximos do tempo do canal
-unsigned int channel0Min = 1053; // 1000 micro segundos.
-unsigned int channel0Max = 2107; // 2000 micro segundos.
+unsigned int channel0Min = 1080; // 1000 micro segundos.
+unsigned int channel0Max = 1920; // 2000 micro segundos.
 unsigned int channel0DeltaT = 526;
-unsigned int channel1Min = 1053; // 1000 micro segundos.
-unsigned int channel1Max = 2107; // 2000 micro segundos.
+unsigned int channel1Min = 1000; // 1000 micro segundos.
+unsigned int channel1Max = 1920; // 2000 micro segundos.
 unsigned int channel1DeltaT = 526;
 
 long int intermediate;
@@ -69,15 +92,25 @@ void setupClock(){
     // Ajusta para aproximadamente 16MHz (RSELx = 15, DCOx = 4, MODx = 0)
     BCSCTL1 = XT2OFF | 0x0F; // Set range para 15, mantendo XT2 desligado
     DCOCTL = DCO2;            // DCOx=4, MODx=0
-    // Definimos o MCLK como sendo o DCO (SELMx=00) sem dividir (DIVMx=00) e o SMCLK como sendo o DCO (SELS=0) dividido por 8 (DIVSx = 11);
-    BCSCTL2 = SELM0 | DIVM_0 | DIVS_3;
+    // Definimos o MCLK como sendo o DCO (SELMx=00) sem dividir (DIVMx=00) e o SMCLK como sendo o DCO (SELS=0) dividido por 4 (DIVSx = 10) --> SMCLK = 4MHz;
+    BCSCTL2 = SELM0 | DIVM_0 | DIVS_2;
+}
+
+void setupTimer_A1(){
+    TA1CCR0 = 255; //Define o valor 255 (8 Bits) para CCR0 ---> Frequencia do PWM = 4 MHz/(255*2) ~= 7,8 kHz
+    TA1CCR1 = 0; // PWM 0 em 0
+    TA1CCR2 = 0; // PWM 1 em 0
+    TA1CTL = TASSEL_2 | MC_2; // Define a frequência do Timer A1 igual a SMCLK e configura para o modo Up/Down;
+    TA1CCTL1 = OUTMOD_7; // Define o modo Reset/Set para CCR1
+    TA1CCTL2 = OUTMOD_7; // Define o modo Reset/Set para CCR2
+
 }
 
 
 void setupCapture(){
     // Timer0_A
-    TACTL = TASSEL_2 // Escolhe o SMCLK (2MHz) como entrada
-          | ID_1     // dividido por 2 (1MHz) - dá um período total de 65,536 ms
+    TACTL = TASSEL_2 // Escolhe o SMCLK (4MHz) como entrada
+          | ID_2     // dividido por 4 (1MHz) - dá um período total de 65,536 ms
           | MC_2;    // Continuous mode
           //| TAIE;   // com interrupções habilitadas
     // Registrador de captura 0
@@ -114,8 +147,8 @@ int captureCheck(void){
         }
     }
     if ((inputChannel0Status==2)||(inputChannel1Status==2)){ // se erro na comunicação
-        P2OUT &= ~LED_B; // desliga o azul
-        P1OUT |= LED_R | LED_G;  // acende o vermelho e o verde
+        P2OUT |= LED_B; // acende o azul
+        P1OUT &= ~(LED_G | LED_R) ;  // desliga o verde e o vermelho
         return 1;
     } else {  // se comunicação chegando ok
         P1OUT &= ~LED_R; // desliga o vermelho
@@ -125,10 +158,13 @@ int captureCheck(void){
     }
 }
 
-// Função de inicialização do PWM
-void pwmSetup(void){
-    P1OUT &= ~(MDA | MDR | MEA | MER);  // por segurança, zera os bits de saída PWM
-    P1DIR |=  (MDA | MDR | MEA | MER);  // Define as saídas
+//Função de inicialização de PWM
+void PWM_setup(){
+    P2OUT &= ~(MER | MEA | MDR | MDA); // os 4 com valor 0
+    P2SEL &= ~(MER | MEA | MDR | MDA);
+    P2DIR |= MER | MEA | MDR | MDA; // Os 4 como saída
+    P2SEL2 &= ~(MER | MEA | MDR | MDA); // o sel2 fica sempre em 0;
+
     chARval = 0;  // dá valores iniciais aos canais
     chDEval = 0;
     //deneg = deltaT
@@ -165,10 +201,11 @@ void ledSetup(void){
     WDTCTL = WDTPW | WDTCNTCL; // habilita o watchdog
 }
 
+
 int calcVal(int chVal,int min,int max,int deltaT){
     int chValDiff = chVal-min;
     int den = (chValDiff<deltaT)?deltaT:max-(min+deltaT);
-    intermediate = (long)(chValDiff-deltaT)<<8; // *256
+    intermediate = (long)(chValDiff-deltaT)<<BITS_PWM; // <<BITS_PWM = *(2^BITS_PWM)  --> Faz a multiplicação do valor para ficar na escala do PWM (limitado pelo long)
     return intermediate/den;
 }
 
@@ -178,20 +215,34 @@ void changePWM(){
     MEval = chARval + chDEval;
 
     // Definição dos valores dos PWMs
+    //MOTOR DIREITO
     if(MDval>0){ // se avanço direito
-        pwmAd = MDval>255?255:MDval;
+        pwmAd = MDval>PWM_MAX?PWM_MAX:MDval;
         pwmRd = 0;
+        P2SEL &= ~MDR; // Define o recuo como I/O
+        TA1CCR2 = pwmAd;
+        P2SEL |= MDA; // Define o avanco como controlado pelo timer
     } else {  // se recuo direito
         pwmAd = 0;
-        pwmRd = MDval<-255?255:-MDval;
+        pwmRd = MDval<-PWM_MAX?PWM_MAX:-MDval;
+        P2SEL &= ~MDA; // Define o avanco como I/O
+        TA1CCR2 = pwmRd;
+        P2SEL |= MDR; // Define o recuo como controlado pelo timer
     }
 
+    //MOTOR ESQUERDO
     if(MEval>0){ // se avanço esquerdo
-        pwmAe = MEval>255?255:MEval;
+        pwmAe = MEval>PWM_MAX?PWM_MAX:MEval;
         pwmRe = 0;
+        P2SEL &= ~MER; // Define o recuo como I/O
+        TA1CCR1 = pwmAe;
+        P2SEL |= MEA; // Define o avanco como controlado pelo timer
     } else {  // se recuo esquerdo
         pwmAe = 0;
-        pwmRe = MEval<-255?255:-MEval;
+        pwmRe = MEval<-PWM_MAX?PWM_MAX:-MEval;
+        P2SEL &= ~MEA; // Define o avanco como I/O
+        TA1CCR1 = pwmRe;
+        P2SEL |= MER; // Define o recuo como controlado pelo timer
     }
 }
 
@@ -202,14 +253,12 @@ void pwmUpdate(void){
     if(inputChannel0Status==3){ // se recebeu nova informação
         if((inputChannel0Value>=channel0Min)&&(inputChannel0Value<=channel0Max)){ // só calcula se dentro da faixa
             chARval = calcVal(inputChannel0Value,channel0Min,channel0Max,channel0DeltaT);
-//            int chValDiff = inputChannel0Value-channel0Min;
-//            int den = (chValDiff<channel0DeltaT)?channel0DeltaT:channel0Max-(channel0Min+channel0DeltaT);
-//            intermediate = (long)(chValDiff-channel0DeltaT)<<8; // *256
-//            chARval = intermediate/den;
         }
+
         inputChannel0Status = 0;
         changePWM(); // atualiza os valores dos PWMs
      }
+
     // Atualiza as informações do canal 1 (Direita/esquerda)
     ////// Tem que testar estas equações
     if(inputChannel1Status==3){ // se recebeu nova informação
@@ -220,14 +269,14 @@ void pwmUpdate(void){
         changePWM(); // atualiza os valores dos PWMs
     }
 
-    pwmCounter++; // como é um char, vai de 0 a 255
+//    pwmCounter=pwmCounter==0?PWM_MAX:pwmCounter-1;
 
     if((inputChannel1Status == 2)){ // se estourou o timeout, zera as saídas
     //if((inputChannel0Status == 2)||(inputChannel1Status == 2)){ // se estourou o timeout, zera as saídas
-        P1OUT &= ~(MDA | MDR); // zera as duas saídas do motor da direita
-        P1OUT &= ~(MEA | MER); // zera as duas saídas do motor da esquerda
+        P2SEL &= ~(MDA | MDR); // zera as duas saídas do motor da direita
+        P2SEL &= ~(MEA | MER); // zera as duas saídas do motor da esquerda
     } else { // se funcionando normalmente, compara os valores com o contador
-        if (pwmAd>pwmCounter){
+/*        if (pwmAd>pwmCounter){
             P1OUT |= MDA;
         } else {
             P1OUT &= ~MDA;
@@ -247,8 +296,10 @@ void pwmUpdate(void){
         } else {
             P1OUT &= ~MER;
         }
+*/
     }
 }
+
 
 // TODO:
 int getFromFlash(){
@@ -262,97 +313,15 @@ int saveInFlash(){
     return 0;
 }
 
-//int calibrateSignal(void){
-//    // espera receber sinal nos dois canais ou dar um timeout
-//    P1OUT &= ~(LED_G | LED_R);
-//    P2OUT |= LED_B;
-//    while(!(((inputChannel0Status == 3) && (inputChannel1Status == 3)) || (inputChannel0Status == 2) || (inputChannel1Status == 2))){
-//        captureCheck();
-//    }
-//    if((inputChannel0Status == 2) || (inputChannel1Status == 2)){ // se foi por timeout
-//        return 0; // sai com falso
-//    } else {
-//        if ((inputChannel0Value < (channel0Min + (channel0DeltaT>>2))) && (inputChannel1Value < (channel1Min + (channel1DeltaT>>2)))){
-//            return 1; // Se a condição for reconhecida
-//        } else {
-//            return 0;
-//        }
-//    }
-//}
-//
-volatile int timeCountCal = 0;
-//int calibrate(void){
-//    // Acende o azul de calibração
-//    unsigned int minch0 = 20000;
-//    unsigned int minch1 = 20000;
-//    unsigned int maxch0 = 0;
-//    unsigned int maxch1 = 0;
-//    unsigned int midch0, midch1;
-//    TACTL |= TAIE; //  habilita a interrupção de estouro do Timer0_A
-//    timeCountCal = 0; // inicializa o contador de tempo da calibração
-//    // este contador é incrementado na interrupção a cada ~65ms. Para um tempo próximo a 2s tem-se que contá-lo 31 vezes
-//    while(timeCountCal<31){
-//        if(inputChannel0Status==3){ // se chegou valor no canal 0
-//            if (inputChannel0Value<minch0) // atualiza o mínimo
-//                minch0 = inputChannel0Value;
-//            if (inputChannel0Value>maxch0) // atualiza o máximo
-//                maxch0 = inputChannel0Value;
-//            int deltaI0 = inputChannel0Value > midch0? inputChannel0Value - midch0: midch0 - inputChannel0Value;
-//            if(deltaI0>50){
-//                midch0 = inputChannel0Value;
-//                timeCountCal = 0;
-//            }
-//            inputChannel0Status = 0; // coloca para receber novo valor
-//        }
-//        if(inputChannel1Status==3){ // se chegou valor no canal 1
-//            if (inputChannel1Value<minch1) // atualiza o mínimo
-//                minch1 = inputChannel1Value;
-//            if (inputChannel1Value>maxch1) // atualiza o máximo
-//                maxch1 = inputChannel1Value;
-//            int deltaI1 = inputChannel1Value > midch1? inputChannel1Value - midch1: midch1 - inputChannel1Value;
-//            if(deltaI1>50){
-//                midch1 = inputChannel1Value;
-//                timeCountCal = 0;
-//            }
-//            inputChannel0Status = 0; // coloca para receber novo valor
-//        }
-//    }
-//    TACTL &= ~TAIE; // desabilita a interrupção de estouro do Timer0_A
-//    if(((midch0-minch0)>200) && ((maxch0-minch0)>200) && ((midch1-minch1)>200) && ((maxch1-minch1)>200)){ // se valores novos fazem sentido
-//        channel0Min = minch0;// atualiza limites do canal 0
-//        channel0Max = maxch0;
-//        channel0DeltaT = midch0-minch0;
-//        channel1Min = minch1;// atualiza limites do canal 1
-//        channel1Max = maxch1;
-//        channel1DeltaT = midch1-minch1;
-//        // Salve na flash
-//        saveInFlash();
-//        // pisca verde
-//        P2OUT &= ~LED_B;
-//        shortDelay();
-//        P1OUT |= LED_G;
-//        shortDelay();
-//        P1OUT &= ~LED_G;
-//    } else { // se calibração está esquisita
-//        // pisca vermelho 2x
-//        getFromFlash();
-//        P2OUT &= ~LED_B;
-//        shortDelay();
-//        P1OUT |= LED_R;
-//        shortDelay();
-//        P1OUT &= ~LED_R;
-//        shortDelay();
-//        P1OUT |= LED_R;
-//        shortDelay();
-//        P1OUT &= ~LED_R;
-//    }
-//    return 0;
-//}
+/******************MAIN***************/
 
 int main(void)
+
+
 {
     wtdgHappened = (IFG1 & WDTIFG);
     setupClock();   // ajusta os clocks
+    setupTimer_A1(); //ajusta o TimerA1
     ledSetup();     // ajusta os leds
     //WDTCTL = WDTPW | WDTCNTCL; // habilita o watchdog
     setupCapture(); // ajusta o timer para captura
@@ -363,18 +332,24 @@ int main(void)
 //    {
 //        getFromFlash();
 //    }
-    
-    pwmSetup();     // incializa os PWMs
+
+    PWM_setup();     // incializa os PWMs
     while(1){
         if((TA0R-loopCounter)>=LOOP_LENGTH){
+//          P2SEL &= ~(MER | MEA | MDR | MDA); //teste
             WDTCTL = WDTPW | WDTCNTCL;  // chuta o cachorro
-            captureCheck();             // checa se chegou algum sinal 
+
+
+            captureCheck();             // checa se chegou algum sinal
             pwmUpdate();                // roda o pwm
             loopCounter += LOOP_LENGTH;
         }
     }
-	return 0;
+    return 0;
 }
+
+
+/******************INTERRUPCOES***************/
 
 // Timer A CCR0 interrupt vector
 #pragma vector=TIMERA0_VECTOR
@@ -430,7 +405,7 @@ switch( TAIV ){
     break;
   case  4: break;  // CCR2 not used
   case 10:         // overflow - usada na calibração
-    timeCountCal++;
+   // timeCountCal++;
     break;
 }
 
